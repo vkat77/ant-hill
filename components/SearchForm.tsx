@@ -73,23 +73,20 @@ export default function SearchForm({ onResults, onRecommendations, onLoading }: 
         if ('error' in recData) throw new Error(recData.error);
         onRecommendations(recData, displayName);
       } else {
-        // Score mode: score + optimize a specific cuisine
+        // Score mode: score first (required), then optimize in parallel (optional — timeout is non-fatal)
         onLoading('Analyzing demographics, competition & foot traffic...');
-        const [scoreRes, optimizeRes] = await Promise.all([
-          fetch('/api/score', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ latLng, cuisineType: effectiveCuisine, radiusMiles: radius }),
-          }),
-          fetch('/api/optimize', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ latLng, cuisineType: effectiveCuisine, radiusMiles: radius }),
-          }),
+
+        const scoreBody = JSON.stringify({ latLng, cuisineType: effectiveCuisine, radiusMiles: radius });
+
+        const [scoreRes, optimizeResult] = await Promise.all([
+          fetch('/api/score', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: scoreBody }),
+          fetch('/api/optimize', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: scoreBody })
+            .then((r) => safeJson<OptimalLocation & { error?: string }>(r))
+            .catch(() => null), // optimizer timeout is non-fatal — score still shows
         ]);
 
         const scoreData = await safeJson<ScoreResult & { error?: string }>(scoreRes);
-        const optimizeData = await safeJson<OptimalLocation & { error?: string }>(optimizeRes);
+        const optimizeData = optimizeResult;
         if (scoreData.error) throw new Error(scoreData.error);
 
         onResults({
