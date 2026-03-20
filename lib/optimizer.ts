@@ -29,7 +29,6 @@ function generateCandidateGrid(center: LatLng, radiusMiles: number): LatLng[] {
       candidates.push({ lat: parseFloat(lat.toFixed(6)), lng: parseFloat(lng.toFixed(6)) });
     }
   }
-  // Filter to circular radius
   return candidates.filter((c) => haversineDistance(center, c) <= radiusMiles);
 }
 
@@ -37,25 +36,40 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Run an array of async tasks in parallel batches of `size`. */
+async function batchedParallel<T>(
+  items: LatLng[],
+  fn: (item: LatLng) => Promise<T>,
+  size: number,
+  delayBetweenBatches = 200
+): Promise<T[]> {
+  const results: T[] = [];
+  for (let i = 0; i < items.length; i += size) {
+    const batch = items.slice(i, i + size);
+    const batchResults = await Promise.all(batch.map(fn));
+    results.push(...batchResults);
+    if (i + size < items.length) await sleep(delayBetweenBatches);
+  }
+  return results;
+}
+
 export async function findOptimalLocation(input: ScoreInput): Promise<OptimalLocation> {
   const candidates = generateCandidateGrid(input.latLng, input.radiusMiles);
 
-  // Fetch competition + foot traffic once for the whole area (shared approximation)
-  const [sharedCompetition, sharedFootTraffic] = await Promise.all([
+  // Phase 1 (parallel): shared data + commercial viability for all candidates at once
+  const [sharedCompetition, sharedFootTraffic, viabilityResults] = await Promise.all([
     getCompetitionData(input.latLng, input.cuisineType, input.radiusMiles),
     getFootTrafficData(input.latLng, input.radiusMiles),
+    batchedParallel(candidates, isCommerciallyViable, 5, 200),
   ]);
 
-  // Score each candidate — skip points that aren't in commercially-zoned areas
+  const viableCandidates = candidates.filter((_, i) => viabilityResults[i]);
+
+  // Phase 2 (sequential): demographics per viable candidate only — Census rate-limits poorly in parallel
   let best: OptimalLocation | null = null;
 
-  for (const candidate of candidates) {
-    await sleep(80); // Rate-limit external APIs
-
-    // Filter: skip residential, parks, water, etc.
-    const commercial = await isCommerciallyViable(candidate);
-    if (!commercial) continue;
-
+  for (const candidate of viableCandidates) {
+    await sleep(80);
     const demographics = await getDemographics(candidate);
     const result = calculateScore(demographics, sharedCompetition, sharedFootTraffic);
 
@@ -68,7 +82,7 @@ export async function findOptimalLocation(input: ScoreInput): Promise<OptimalLoc
     }
   }
 
-  // If no commercially-viable candidate was found, fall back to the queried location itself
+  // Fallback: if no commercially-viable candidate found, score the queried location itself
   if (!best) {
     const demographics = await getDemographics(input.latLng);
     const result = calculateScore(demographics, sharedCompetition, sharedFootTraffic);

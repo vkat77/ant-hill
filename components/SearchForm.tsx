@@ -17,6 +17,21 @@ interface Props {
   onLoading: (step: string | null) => void;
 }
 
+/** Parse a fetch response safely — throws a readable error if the body isn't JSON. */
+async function safeJson<T>(res: Response): Promise<T> {
+  const text = await res.text();
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    // Non-JSON body: likely a Vercel timeout/crash page
+    if (res.status === 504 || res.status === 408) {
+      throw new Error('Request timed out. Try a smaller search radius.');
+    }
+    const preview = text.slice(0, 120).replace(/\s+/g, ' ');
+    throw new Error(`Server error (${res.status}): ${preview}`);
+  }
+}
+
 export default function SearchForm({ onResults, onRecommendations, onLoading }: Props) {
   const [mode, setMode] = useState<Mode>('score');
   const [address, setAddress] = useState('');
@@ -42,7 +57,7 @@ export default function SearchForm({ onResults, onRecommendations, onLoading }: 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ address }),
       });
-      const geoData: GeocodeResult & { error?: string } = await geoRes.json();
+      const geoData = await safeJson<GeocodeResult & { error?: string }>(geoRes);
       if (geoData.error) throw new Error(geoData.error);
       const { latLng, displayName } = geoData;
 
@@ -54,7 +69,7 @@ export default function SearchForm({ onResults, onRecommendations, onLoading }: 
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ latLng, radiusMiles: radius }),
         });
-        const recData: CuisineRecommendation[] | { error: string } = await recRes.json();
+        const recData = await safeJson<CuisineRecommendation[] | { error: string }>(recRes);
         if ('error' in recData) throw new Error(recData.error);
         onRecommendations(recData, displayName);
       } else {
@@ -73,8 +88,8 @@ export default function SearchForm({ onResults, onRecommendations, onLoading }: 
           }),
         ]);
 
-        const scoreData: ScoreResult & { error?: string } = await scoreRes.json();
-        const optimizeData: OptimalLocation & { error?: string } = await optimizeRes.json();
+        const scoreData = await safeJson<ScoreResult & { error?: string }>(scoreRes);
+        const optimizeData = await safeJson<OptimalLocation & { error?: string }>(optimizeRes);
         if (scoreData.error) throw new Error(scoreData.error);
 
         onResults({
