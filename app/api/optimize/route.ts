@@ -16,6 +16,7 @@ export async function POST(req: NextRequest) {
     const optimal = await findOptimalLocation(input);
     return NextResponse.json(optimal);
   } catch (err) {
+    console.error('[/api/optimize]', err);
     const message = err instanceof Error ? err.message : 'Optimization failed';
     return NextResponse.json({ error: message }, { status: 500 });
   }

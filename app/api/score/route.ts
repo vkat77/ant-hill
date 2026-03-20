@@ -22,6 +22,7 @@ export async function POST(req: NextRequest) {
     const result = calculateScore(demographics, competition, footTraffic);
     return NextResponse.json(result);
   } catch (err) {
+    console.error('[/api/score]', err);
     const message = err instanceof Error ? err.message : 'Scoring failed';
     return NextResponse.json({ error: message }, { status: 500 });
   }

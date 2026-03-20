@@ -12,8 +12,14 @@ async function runOverpassQuery(query: string): Promise<{ elements: OverpassElem
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: `data=${encodeURIComponent(query)}`,
   });
-  if (!res.ok) throw new Error(`Overpass error: ${res.status}`);
-  return res.json();
+  const text = await res.text();
+  if (!res.ok) throw new Error(`Overpass error ${res.status}: ${text.slice(0, 200)}`);
+  try {
+    return JSON.parse(text);
+  } catch {
+    console.error('Overpass returned non-JSON:', text.slice(0, 300));
+    throw new Error(`Overpass returned unexpected response: ${text.slice(0, 100)}`);
+  }
 }
 
 interface OverpassElement {

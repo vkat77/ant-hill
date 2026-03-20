@@ -21,7 +21,14 @@ export async function getDemographics(latLng: LatLng): Promise<DemographicsData>
     const acsRes = await fetch(acsUrl, { next: { revalidate: 86400 } });
     if (!acsRes.ok) throw new Error('ACS fetch failed');
 
-    const acsData: string[][] = await acsRes.json();
+    const acsText = await acsRes.text();
+    let acsData: string[][];
+    try {
+      acsData = JSON.parse(acsText);
+    } catch {
+      console.error('ACS non-JSON response:', acsText.slice(0, 300));
+      throw new Error('Census ACS returned unexpected response');
+    }
     const row = acsData[1];
     const income = parseInt(row[0]);
     const population = parseInt(row[1]);
@@ -32,7 +39,13 @@ export async function getDemographics(latLng: LatLng): Promise<DemographicsData>
 
     let densityPerSqMile: number | null = null;
     if (tigerRes.ok) {
-      const tigerData = await tigerRes.json();
+      const tigerText = await tigerRes.text();
+      let tigerData: { features?: Array<{ attributes?: { ALAND?: number } }> };
+      try {
+        tigerData = JSON.parse(tigerText);
+      } catch {
+        tigerData = {};
+      }
       const aland = tigerData?.features?.[0]?.attributes?.ALAND;
       if (aland && aland > 0) {
         const areaSqMiles = aland / 2589988.11;

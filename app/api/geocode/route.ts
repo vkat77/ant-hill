@@ -10,6 +10,7 @@ export async function POST(req: NextRequest) {
     const result = await geocodeAddress(address);
     return NextResponse.json(result);
   } catch (err) {
+    console.error('[/api/geocode]', err);
     const message = err instanceof Error ? err.message : 'Geocoding failed';
     return NextResponse.json({ error: message }, { status: 500 });
   }
