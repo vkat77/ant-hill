@@ -66,6 +66,6 @@ export interface FullAnalysisResult {
   queriedLocation: LatLng;
   queriedAddress: string;
   queriedScore: ScoreResult;
-  optimalLocation: OptimalLocation;
+  optimalLocation: OptimalLocation | null;
   competitors: LatLng[];
 }

@@ -62,6 +62,61 @@ out center;`;
   }
 }
 
+/**
+ * Fetches all restaurants in the radius in a single query and returns
+ * a map of cuisine tag → { count, locations }.
+ * Used by the recommender to avoid making one Overpass call per cuisine.
+ */
+export async function getAllRestaurantsByCuisine(
+  latLng: LatLng,
+  radiusMiles: number
+): Promise<Map<string, CompetitionData>> {
+  const radius = milesToMeters(radiusMiles);
+  const { lat, lng } = latLng;
+
+  const query = `
+[out:json][timeout:25];
+(
+  node["amenity"="restaurant"](around:${radius},${lat},${lng});
+  way["amenity"="restaurant"](around:${radius},${lat},${lng});
+);
+out center tags;`;
+
+  const cuisineMap = new Map<string, CompetitionData>();
+
+  try {
+    const data = await runOverpassQuery(query);
+
+    for (const el of data.elements) {
+      const rawCuisine = el.tags?.cuisine;
+      if (!rawCuisine) continue;
+
+      const location: LatLng | null =
+        el.lat && el.lon ? { lat: el.lat, lng: el.lon }
+        : el.center ? { lat: el.center.lat, lng: el.center.lon }
+        : null;
+
+      // OSM cuisine tags can be semicolon-delimited (e.g. "pizza;italian")
+      const parts = rawCuisine.toLowerCase().split(/[;,]/);
+      for (const part of parts) {
+        const tag = part.trim();
+        if (!tag) continue;
+        const existing = cuisineMap.get(tag) ?? { sameTypeCount: 0, competitorLocations: [] };
+        cuisineMap.set(tag, {
+          sameTypeCount: existing.sameTypeCount + 1,
+          competitorLocations: location
+            ? [...existing.competitorLocations, location]
+            : existing.competitorLocations,
+        });
+      }
+    }
+  } catch {
+    // Return empty map — recommender falls back to 0 competitors per cuisine
+  }
+
+  return cuisineMap;
+}
+
 // OSM commercial landuse values that indicate a location can host a restaurant
 const COMMERCIAL_LANDUSE = ['commercial', 'retail', 'mixed', 'industrial', 'village_green'];
 

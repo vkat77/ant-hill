@@ -1,6 +1,6 @@
-import { DemographicsData, FootTrafficData, LatLng, ScoreInput } from './types';
+import { LatLng } from './types';
 import { getDemographics } from './demographics';
-import { getCompetitionData, getFootTrafficData } from './overpass';
+import { getAllRestaurantsByCuisine, getFootTrafficData } from './overpass';
 import { calculateScore } from './scoring';
 
 // Cuisines to evaluate — broad enough to be useful, narrow enough to be fast
@@ -66,26 +66,33 @@ export interface CuisineRecommendation {
   demographicsFit: string;
 }
 
-function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
 export async function recommendCuisines(
   latLng: LatLng,
   radiusMiles: number
 ): Promise<CuisineRecommendation[]> {
-  // Fetch demographics and foot traffic once — shared across all cuisines
-  const [demographics, footTraffic] = await Promise.all([
+  // Fetch demographics, foot traffic, and all restaurant data in parallel
+  const [demographics, footTraffic, allRestaurants] = await Promise.all([
     getDemographics(latLng),
     getFootTrafficData(latLng, radiusMiles),
+    getAllRestaurantsByCuisine(latLng, radiusMiles),
   ]);
 
-  const results: CuisineRecommendation[] = [];
+  const results: CuisineRecommendation[] = CUISINES_TO_TEST.map((cuisine) => {
+    // Look up competition from the bulk result; match OSM tags that contain the cuisine name
+    const directMatch = allRestaurants.get(cuisine);
+    const competition: { sameTypeCount: number; competitorLocations: LatLng[] } = directMatch ?? (() => {
+      // Also count restaurants whose cuisine tag contains this cuisine as a substring
+      let count = 0;
+      const locations: LatLng[] = [];
+      for (const [tag, data] of allRestaurants) {
+        if (tag.includes(cuisine) || cuisine.includes(tag)) {
+          count += data.sameTypeCount;
+          locations.push(...data.competitorLocations);
+        }
+      }
+      return { sameTypeCount: count, competitorLocations: locations };
+    })();
 
-  for (const cuisine of CUISINES_TO_TEST) {
-    await sleep(80); // rate-limit Overpass
-
-    const competition = await getCompetitionData(latLng, cuisine, radiusMiles);
     const baseScore = calculateScore(demographics, competition, footTraffic);
 
     const tier = CUISINE_TIER[cuisine] ?? 'mainstream';
@@ -112,15 +119,15 @@ export async function recommendCuisines(
     else demographicsFit = 'Weaker income match for this area';
     if (inc !== null) demographicsFit += ` ($${Math.round(inc / 1000)}k median income)`;
 
-    results.push({
+    return {
       cuisine,
       label: cuisine.charAt(0).toUpperCase() + cuisine.slice(1).replace('_', ' '),
       score: adjustedScore,
       competitorCount: count,
       opportunityReason,
       demographicsFit,
-    });
-  }
+    };
+  });
 
   // Sort by score descending, return top 5
   return results.sort((a, b) => b.score - a.score).slice(0, 5);
